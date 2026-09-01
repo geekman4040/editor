@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CONCAT DESK — 画像の結合</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --canvas:#171a21;
+  --panel:#1f232c;
+  --sunk:#141821;
+  --edge:#2f3641;
+  --paper:#e9edf3;
+  --muted:#8a93a2;
+  --signal:#e8b04b;
+  --signal-soft:rgba(232,176,75,.14);
+  --danger:#e06a5a;
+  --sans:"IBM Plex Sans Condensed",-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--canvas);color:var(--paper);
+  font-family:var(--sans);font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow:hidden;
+}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+
+/* ---------- shell ---------- */
+.app{display:grid;grid-template-columns:1fr 320px;grid-template-rows:52px 1fr;height:100%}
+.bar{
+  grid-column:1/-1;display:flex;align-items:center;gap:16px;
+  padding:0 16px;background:var(--panel);border-bottom:1px solid var(--edge);
+}
+.mark{font-weight:600;letter-spacing:.22em;text-transform:uppercase;font-size:13px}
+.mark i{color:var(--signal);font-style:normal}
+.bar .meta{
+  font-family:var(--mono);font-size:11.5px;color:var(--muted);
+  margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46vw;
+}
+.btn{
+  background:transparent;border:1px solid var(--edge);color:var(--paper);
+  border-radius:2px;padding:6px 12px;letter-spacing:.04em;transition:border-color .15s,background .15s;
+}
+.btn:hover{border-color:var(--signal);background:var(--signal-soft)}
+.btn:focus-visible,.chip:focus-visible,.seg button:focus-visible,.mini:focus-visible{
+  outline:2px solid var(--signal);outline-offset:2px
+}
+.btn.primary{background:var(--signal);border-color:var(--signal);color:#20180a;font-weight:600}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn.primary:disabled:hover{filter:none}
+
+/* ---------- stage ---------- */
+.stage{position:relative;overflow:hidden;display:grid;place-items:center;padding:24px;
+  background-image:radial-gradient(circle at 1px 1px,#232833 1px,transparent 0);background-size:22px 22px}
+.empty{text-align:center;color:var(--muted);max-width:360px;user-select:none}
+.empty .plate{
+  border:1px dashed var(--edge);padding:34px 28px;border-radius:3px;transition:border-color .2s,background .2s;
+}
+.empty h1{font-size:17px;letter-spacing:.06em;color:var(--paper);margin:0 0 6px;font-weight:500}
+.empty p{margin:0;font-size:13px}
+.empty kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--edge);border-radius:2px;padding:1px 5px}
+body.dragging .empty .plate{border-color:var(--signal);background:var(--signal-soft)}
+body.dragging .stage::after{
+  content:"ドロップして読み込む（最大3枚）";position:absolute;inset:12px;border:1px dashed var(--signal);
+  display:grid;place-items:center;font-size:13px;letter-spacing:.1em;color:var(--signal);
+  background:rgba(23,26,33,.72);pointer-events:none;z-index:20;
+}
+.board{position:relative;line-height:0;box-shadow:0 18px 50px rgba(0,0,0,.5);
+  background-image:linear-gradient(45deg,#20242d 25%,transparent 25%,transparent 75%,#20242d 75%),
+                   linear-gradient(45deg,#20242d 25%,transparent 25%,transparent 75%,#20242d 75%);
+  background-size:18px 18px;background-position:0 0,9px 9px;background-color:#191d25}
+.board canvas{display:block;touch-action:none;cursor:grab}
+.board canvas.busy{cursor:grabbing}
+.hidden{display:none !important}
+
+/* ---------- panel ---------- */
+.panel{background:var(--panel);border-left:1px solid var(--edge);overflow-y:auto;padding:4px 0 24px}
+.sec{padding:16px;border-bottom:1px solid var(--edge)}
+.sec > h2{
+  margin:0 0 10px;font-size:10.5px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);
+  display:flex;align-items:center;gap:8px;
+}
+.sec > h2::after{content:"";flex:1;height:1px;background:var(--edge)}
+.note{font-size:12px;color:var(--muted);margin:8px 0 0}
+
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  background:var(--sunk);border:1px solid var(--edge);border-radius:2px;
+  padding:6px 9px;font-family:var(--mono);font-size:12px;letter-spacing:.02em;transition:.15s;
+}
+.chip:hover{border-color:#4a5464}
+.chip[aria-pressed="true"]{border-color:var(--signal);background:var(--signal-soft);color:var(--signal)}
+.chip small{color:var(--muted);font-size:10px}
+.chip[aria-pressed="true"] small{color:var(--signal)}
+
+.seg{display:flex;border:1px solid var(--edge);border-radius:2px;overflow:hidden}
+.seg button{flex:1;background:var(--sunk);border:0;border-right:1px solid var(--edge);
+  padding:7px 0;font-family:var(--mono);font-size:12px;color:var(--muted);transition:.15s}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--signal-soft);color:var(--signal)}
+
+.range{display:flex;align-items:center;gap:10px;margin-top:10px}
+.range .lbl{color:var(--muted);font-size:12px;width:34px;flex:none}
+.range input[type=range]{flex:1;accent-color:var(--signal);min-width:0}
+.range b{font-family:var(--mono);font-size:12px;font-weight:500;width:48px;text-align:right}
+
+/* ---------- image slots ---------- */
+.slots{display:flex;flex-direction:column;gap:8px}
+.slot{display:flex;align-items:center;gap:10px;background:var(--sunk);
+  border:1px solid var(--edge);border-radius:2px;padding:8px;transition:.15s;cursor:pointer}
+.slot:hover{border-color:#4a5464}
+.slot[data-sel="1"]{border-color:var(--signal);background:var(--signal-soft)}
+.slot .idx{font-family:var(--mono);font-size:11px;color:var(--signal);width:14px;flex:none;text-align:center}
+.slot .th{width:52px;height:38px;flex:none;object-fit:cover;background:#0e1116;border:1px solid var(--edge)}
+.slot .nm{flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slot .nm small{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+.slot .ops{display:flex;gap:2px;flex:none}
+.mini{background:transparent;border:1px solid var(--edge);border-radius:2px;color:var(--muted);
+  width:24px;height:24px;line-height:1;padding:0;font-size:12px;transition:.15s}
+.mini:hover{border-color:var(--signal);color:var(--signal)}
+.mini.del:hover{border-color:var(--danger);color:var(--danger)}
+.mini:disabled{opacity:.3;cursor:not-allowed}
+
+/* ---------- seams ---------- */
+.seam{border:1px solid var(--edge);border-radius:2px;padding:10px 12px 12px;margin-top:10px;background:var(--sunk)}
+.seam:first-of-type{margin-top:0}
+.seam header{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.seam header b{color:var(--paper);font-weight:500}
+.seam header .btn{margin-left:auto;padding:2px 8px;font-size:11px}
+
+.swatch{display:flex;align-items:center;gap:10px;margin-top:10px}
+.swatch input[type=color]{width:38px;height:26px;padding:0;background:var(--sunk);
+  border:1px solid var(--edge);border-radius:2px;cursor:pointer}
+.switch{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;margin-top:10px}
+.switch input{position:absolute;opacity:0;pointer-events:none}
+.track{width:38px;height:20px;flex:none;border-radius:10px;background:var(--sunk);
+  border:1px solid var(--edge);position:relative;transition:.18s}
+.track::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;
+  background:var(--muted);transition:.18s}
+.switch input:checked + .track{background:var(--signal-soft);border-color:var(--signal)}
+.switch input:checked + .track::after{transform:translateX(18px);background:var(--signal)}
+.switch input:focus-visible + .track{outline:2px solid var(--signal);outline-offset:2px}
+
+.readouts{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-family:var(--mono);font-size:12px}
+.readouts div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px dotted var(--edge);padding-bottom:3px}
+.readouts b{font-weight:500}
+.readouts span{color:var(--muted)}
+
+.sizerow{display:flex;align-items:center;gap:8px;margin-top:10px}
+.sizerow input{width:100%;min-width:0;background:var(--sunk);border:1px solid var(--edge);border-radius:2px;
+  padding:6px 8px;font-family:var(--mono);font-size:12px;text-align:center}
+.sizerow input:focus{outline:none;border-color:var(--signal)}
+.sizerow span{color:var(--muted);font-size:12px;white-space:nowrap}
+
+.filename{
+  margin-top:12px;background:var(--sunk);border:1px solid var(--edge);border-radius:2px;
+  padding:8px 10px;font-family:var(--mono);font-size:11.5px;color:var(--signal);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.sec .save{width:100%;margin-top:12px;padding:10px 0}
+.rowbtns{display:flex;gap:6px;margin-top:12px}
+.rowbtns .btn{flex:1;padding:6px 4px;font-size:12.5px}
+
+@media (max-width:820px){
+  body{overflow:auto}
+  .app{grid-template-columns:1fr;grid-template-rows:52px minmax(46vh,1fr) auto;height:auto;min-height:100%}
+  .panel{border-left:0;border-top:1px solid var(--edge)}
+  .bar .meta{max-width:36vw}
+}
+@media (prefers-reduced-motion:reduce){ *{transition-duration:.01ms !important} }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="mark">Concat<i>/</i>Desk</div>
+    <button class="btn" id="pickBtn">画像を選ぶ</button>
+    <div class="meta" id="meta">画像を読み込んでください（最大3枚）</div>
+  </header>
+
+  <main class="stage" id="stage">
+    <div class="empty" id="empty">
+      <div class="plate">
+        <h1>画像をここにドロップ</h1>
+        <p>最大3枚まで／クリックしてファイルを選ぶ・<kbd>Ctrl</kbd>+<kbd>V</kbd> で貼り付けもできます</p>
+      </div>
+    </div>
+    <div class="board hidden" id="board">
+      <canvas id="cv"></canvas>
+    </div>
+  </main>
+
+  <aside class="panel">
+    <section class="sec">
+      <h2>画像（最大3枚）</h2>
+      <div class="slots" id="slots"></div>
+      <p class="note" id="slotNote">キャンバス上をドラッグすると、その画像の位置を調整できます。</p>
+    </section>
+
+    <section class="sec">
+      <h2>出力比率</h2>
+      <div class="chips" id="chips"></div>
+      <p class="note">横長の比率は横並び、縦長の比率は縦並びに自動で切り替わります。</p>
+      <div class="seg" id="dirSeg" style="margin-top:10px">
+        <button data-dir="auto" aria-pressed="true">自動</button>
+        <button data-dir="row" aria-pressed="false">横並び</button>
+        <button data-dir="col" aria-pressed="false">縦並び</button>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>結合部</h2>
+      <div id="seams"></div>
+      <p class="note" id="seamNote">画像を2枚以上読み込むと調整できます。</p>
+      <div class="range">
+        <span class="lbl">隙間</span>
+        <input type="range" id="gap" min="0" max="80" step="1" value="0" aria-label="結合部の隙間">
+        <b id="gapVal">0 px</b>
+      </div>
+      <div class="swatch">
+        <input type="color" id="gapColor" value="#ffffff" aria-label="隙間・背景の色">
+        <span style="color:var(--muted);font-size:12px">隙間と背景の色</span>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="alpha">
+        <span class="track"></span>
+        <span>背景を透明にする（png / webp）</span>
+      </label>
+    </section>
+
+    <section class="sec">
+      <h2>選択中の画像</h2>
+      <div class="range">
+        <span class="lbl">拡大</span>
+        <input type="range" id="zoom" min="100" max="320" step="1" value="100" aria-label="拡大率">
+        <b id="zoomVal">100%</b>
+      </div>
+      <div class="rowbtns">
+        <button class="btn" id="fitBtn">位置を中央に</button>
+        <button class="btn" id="resetAllBtn">すべて初期化</button>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>書き出し</h2>
+      <div class="sizerow">
+        <span>長辺</span>
+        <input id="outLong" type="number" min="64" max="8000" step="1" value="1920" aria-label="出力の長辺">
+        <span>px</span>
+      </div>
+      <div class="readouts" style="margin-top:12px">
+        <div><span>幅</span><b id="rW">—</b></div>
+        <div><span>高さ</span><b id="rH">—</b></div>
+      </div>
+      <div class="seg" id="fmt" style="margin-top:12px">
+        <button data-fmt="jpeg" aria-pressed="true">jpg</button>
+        <button data-fmt="png" aria-pressed="false">png</button>
+        <button data-fmt="webp" aria-pressed="false">webp</button>
+      </div>
+      <div class="range" id="qRow">
+        <span class="lbl">画質</span>
+        <input type="range" id="quality" min="40" max="100" step="1" value="92" aria-label="画質">
+        <b id="qVal">92</b>
+      </div>
+      <div class="filename" id="outName">—</div>
+      <button class="btn primary save" id="saveBtn" disabled>保存する</button>
+    </section>
+  </aside>
+</div>
+
+<input type="file" id="file" accept="image/*" multiple hidden>
+
+<script>
+(() => {
+'use strict';
+
+const $ = id => document.getElementById(id);
+const stage=$('stage'), board=$('board'), cv=$('cv'), empty=$('empty'),
+      meta=$('meta'), fileInput=$('file');
+const ctx = cv.getContext('2d');
+
+const MAX = 3;
+const RATIOS = [[16,9],[4,3],[1,1],[3,4],[9,16]];
+
+const S = {
+  imgs:[],                 // {img,url,name,w,h,ox,oy,zoom}
+  sel:0,
+  ratio:[16,9],
+  dirMode:'auto',          // auto | row | col
+  seams:[],                // {pos:0-1, tilt:deg}
+  gap:0, gapColor:'#ffffff', alpha:false,
+  outLong:1920,
+  fmt:'jpeg', quality:0.92,
+  disp:{w:0,h:0,scale:1}
+};
+
+const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
+const dir = () => S.dirMode==='auto' ? (S.ratio[0]>=S.ratio[1] ? 'row' : 'col') : S.dirMode;
+
+/* ---------- 出力サイズ ---------- */
+function outSize(){
+  const aw=S.ratio[0], ah=S.ratio[1];
+  const L = clamp(Math.round(S.outLong)||1920, 64, 8000);
+  return aw>=ah ? {w:L, h:Math.max(1,Math.round(L*ah/aw))}
+                : {w:Math.max(1,Math.round(L*aw/ah)), h:L};
+}
+
+/* ---------- 結合部の管理 ---------- */
+function syncSeams(){
+  const need = Math.max(0, S.imgs.length-1);
+  while(S.seams.length > need) S.seams.pop();
+  while(S.seams.length < need) S.seams.push({pos:0, tilt:0});
+  const n = S.imgs.length;
+  S.seams.forEach((s,i)=>{ if(!s.pos) s.pos = (i+1)/n; });   // pos 未設定なら等分
+}
+
+/* ---------- 領域（多角形）の計算 ---------- */
+function regions(W,H,gapPx){
+  const n = S.imgs.length;
+  if(n===0) return [];
+  const row = dir()==='row';
+  // k番目の境界線の座標。t は 0..1（横並びなら上端→下端、縦並びなら左端→右端）
+  const line = (k,t) => {
+    const s = S.seams[k];
+    const tan = Math.tan(s.tilt*Math.PI/180);
+    return row ? s.pos*W + (H/2 - t*H)*tan
+               : s.pos*H + (W/2 - t*W)*tan;
+  };
+  // 隙間の見た目の幅を一定にするため、線の法線方向ではなく軸方向の補正量を返す
+  const inset = k => {
+    const c = Math.cos(S.seams[k].tilt*Math.PI/180);
+    return (gapPx/2)/Math.max(.2, Math.abs(c));
+  };
+  const out = [];
+  for(let i=0;i<n;i++){
+    const hasA = i>0, hasB = i<n-1;
+    const far = row ? W+4 : H+4;
+    const a0 = hasA ? line(i-1,0)+inset(i-1) : -4;
+    const a1 = hasA ? line(i-1,1)+inset(i-1) : -4;
+    const b0 = hasB ? line(i,0)-inset(i)     : far;
+    const b1 = hasB ? line(i,1)-inset(i)     : far;
+    out.push(row ? [[a0,0],[b0,0],[b1,H],[a1,H]]
+                 : [[0,a0],[W,a1],[W,b1],[0,b0]]);
+  }
+  return out;
+}
+function bbox(poly){
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+  poly.forEach(p=>{ x0=Math.min(x0,p[0]); y0=Math.min(y0,p[1]); x1=Math.max(x1,p[0]); y1=Math.max(y1,p[1]); });
+  return {x:x0, y:y0, w:x1-x0, h:y1-y0};
+}
+function clipBox(poly,W,H){
+  const b = bbox(poly);
+  const x0=Math.max(b.x,0), y0=Math.max(b.y,0);
+  const x1=Math.min(b.x+b.w,W), y1=Math.min(b.y+b.h,H);
+  return {x:x0, y:y0, w:Math.max(1,x1-x0), h:Math.max(1,y1-y0)};
+}
+function inPoly(poly, px, py){
+  let hit=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i][0], yi=poly[i][1], xj=poly[j][0], yj=poly[j][1];
+    if(((yi>py)!==(yj>py)) && (px < (xj-xi)*(py-yi)/(yj-yi)+xi)) hit=!hit;
+  }
+  return hit;
+}
+
+/* ---------- 描画 ---------- */
+function coverRect(it, r){
+  const s = Math.max(r.w/it.w, r.h/it.h) * it.zoom;
+  const dw = it.w*s, dh = it.h*s;
+  return { dx: r.x + (r.w-dw)*it.ox, dy: r.y + (r.h-dh)*it.oy, dw, dh };
+}
+function trace(c, poly){
+  c.beginPath();
+  poly.forEach((p,k)=> k ? c.lineTo(p[0],p[1]) : c.moveTo(p[0],p[1]));
+  c.closePath();
+}
+function draw(c, W, H, gapPx, opts){
+  opts = opts || {};
+  c.save();
+  c.clearRect(0,0,W,H);
+  if(!(S.alpha && S.fmt!=='jpeg')){ c.fillStyle = S.gapColor; c.fillRect(0,0,W,H); }
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+  const polys = regions(W,H,gapPx);
+  polys.forEach((poly,i)=>{
+    const it = S.imgs[i]; if(!it) return;
+    c.save();
+    trace(c, poly); c.clip();
+    const d = coverRect(it, clipBox(poly,W,H));
+    c.drawImage(it.img, d.dx, d.dy, d.dw, d.dh);
+    c.restore();
+  });
+  if(opts.highlight != null && polys[opts.highlight] && polys.length>1){
+    c.save();
+    trace(c, polys[opts.highlight]);
+    c.setLineDash([7,7]); c.lineWidth=2; c.strokeStyle='rgba(232,176,75,.9)';
+    c.stroke();
+    c.restore();
+  }
+  c.restore();
+  return polys;
+}
+
+let lastPolys = [];
+function render(){
+  if(!S.imgs.length) return;
+  const o = outSize();
+  const pad = 48;
+  const sw = Math.max(120, stage.clientWidth - pad);
+  const sh = Math.max(120, stage.clientHeight - pad);
+  const scale = Math.min(sw/o.w, sh/o.h, 1);
+  const W = Math.max(1,Math.round(o.w*scale)), H = Math.max(1,Math.round(o.h*scale));
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
+  cv.style.width = W+'px'; cv.style.height = H+'px';
+  board.style.width = W+'px'; board.style.height = H+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  S.disp = {w:W, h:H, scale:W/o.w};
+  lastPolys = draw(ctx, W, H, S.gap*S.disp.scale, {highlight:S.sel});
+  $('rW').textContent = o.w+' px';
+  $('rH').textContent = o.h+' px';
+  updateName();
+}
+window.addEventListener('resize', render);
+
+/* ---------- 読み込み ---------- */
+function addFiles(list){
+  const files = [].slice.call(list).filter(f=>f && f.type.startsWith('image/'));
+  if(!files.length) return;
+  const room = MAX - S.imgs.length;
+  if(room <= 0){ meta.textContent = '画像は最大'+MAX+'枚までです。追加するには既存の画像を削除してください。'; return; }
+  const use = files.slice(0, room);
+  const skipped = files.length - use.length;
+  let pending = use.length;
+  use.forEach(f=>{
+    const url = URL.createObjectURL(f);
+    const img = new Image();
+    img.onload = () => {
+      S.imgs.push({img, url, name:f.name||'image', w:img.naturalWidth, h:img.naturalHeight, ox:.5, oy:.5, zoom:1});
+      if(--pending===0) afterAdd(skipped);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); if(--pending===0) afterAdd(skipped); };
+    img.src = url;
+  });
+}
+function afterAdd(skipped){
+  S.imgs = S.imgs.slice(0, MAX);
+  S.sel = clamp(S.sel, 0, Math.max(0,S.imgs.length-1));
+  if(S.imgs.length){
+    empty.classList.add('hidden'); board.classList.remove('hidden');
+    $('saveBtn').disabled = false;
+  }
+  S.seams.forEach(s=>{ s.pos = 0; });   // 枚数が変わったので等分に置き直す
+  syncSeams();
+  meta.textContent = S.imgs.length + ' / ' + MAX + ' 枚' + (skipped ? '（'+skipped+'枚は上限のため読み込みませんでした）' : '');
+  renderSlots(); renderSeams(); syncZoom(); render();
+}
+$('pickBtn').addEventListener('click', ()=>fileInput.click());
+empty.addEventListener('click', ()=>fileInput.click());
+fileInput.addEventListener('change', e=>{ addFiles(e.target.files); fileInput.value=''; });
+
+let dragDepth=0;
+window.addEventListener('dragenter', e=>{ e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
+window.addEventListener('dragover', e=>e.preventDefault());
+window.addEventListener('dragleave', e=>{ if(--dragDepth<=0){ dragDepth=0; document.body.classList.remove('dragging'); } });
+window.addEventListener('drop', e=>{
+  e.preventDefault(); dragDepth=0; document.body.classList.remove('dragging');
+  if(e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
+});
+window.addEventListener('paste', e=>{
+  if(e.clipboardData && e.clipboardData.files && e.clipboardData.files.length) addFiles(e.clipboardData.files);
+});
+
+/* ---------- 画像スロット ---------- */
+function renderSlots(){
+  const box = $('slots');
+  box.innerHTML='';
+  if(!S.imgs.length){
+    const p=document.createElement('p');
+    p.className='note'; p.style.margin='0'; p.textContent='まだ画像がありません。';
+    box.appendChild(p); return;
+  }
+  S.imgs.forEach((it,i)=>{
+    const row=document.createElement('div');
+    row.className='slot'; row.dataset.sel = (i===S.sel)?'1':'0';
+    row.addEventListener('click', ()=>{ S.sel=i; renderSlots(); syncZoom(); render(); });
+
+    const idx=document.createElement('span'); idx.className='idx'; idx.textContent=String(i+1);
+    const th=document.createElement('img'); th.className='th'; th.src=it.url; th.alt='';
+    const nm=document.createElement('div'); nm.className='nm'; nm.textContent=it.name;
+    const sub=document.createElement('small'); sub.textContent=it.w+'×'+it.h;
+    nm.appendChild(sub);
+
+    const ops=document.createElement('div'); ops.className='ops';
+    const up=document.createElement('button'); up.className='mini'; up.type='button';
+    up.textContent='↑'; up.title='前へ'; up.disabled = i===0;
+    up.addEventListener('click', ev=>{ ev.stopPropagation(); swap(i,i-1); });
+    const dn=document.createElement('button'); dn.className='mini'; dn.type='button';
+    dn.textContent='↓'; dn.title='後ろへ'; dn.disabled = i===S.imgs.length-1;
+    dn.addEventListener('click', ev=>{ ev.stopPropagation(); swap(i,i+1); });
+    const del=document.createElement('button'); del.className='mini del'; del.type='button';
+    del.textContent='×'; del.title='削除';
+    del.addEventListener('click', ev=>{ ev.stopPropagation(); removeAt(i); });
+    ops.appendChild(up); ops.appendChild(dn); ops.appendChild(del);
+
+    row.appendChild(idx); row.appendChild(th); row.appendChild(nm); row.appendChild(ops);
+    box.appendChild(row);
+  });
+}
+function swap(a,b){
+  const t=S.imgs[a]; S.imgs[a]=S.imgs[b]; S.imgs[b]=t;
+  if(S.sel===a) S.sel=b; else if(S.sel===b) S.sel=a;
+  renderSlots(); render();
+}
+function removeAt(i){
+  const it = S.imgs.splice(i,1)[0];
+  if(it) URL.revokeObjectURL(it.url);
+  S.sel = clamp(S.sel, 0, Math.max(0,S.imgs.length-1));
+  S.seams.forEach(s=>{ s.pos = 0; });
+  syncSeams();
+  if(!S.imgs.length){
+    board.classList.add('hidden'); empty.classList.remove('hidden');
+    $('saveBtn').disabled = true;
+    meta.textContent = '画像を読み込んでください（最大3枚）';
+  }else{
+    meta.textContent = S.imgs.length + ' / ' + MAX + ' 枚';
+  }
+  renderSlots(); renderSeams(); syncZoom(); render();
+}
+
+/* ---------- 比率と並び ---------- */
+function renderChips(){
+  const box=$('chips'); box.innerHTML='';
+  RATIOS.forEach(r=>{
+    const w=r[0], h=r[1];
+    const b=document.createElement('button');
+    b.className='chip'; b.type='button';
+    b.setAttribute('aria-pressed', String(S.ratio[0]===w && S.ratio[1]===h));
+    b.append(w+':'+h);
+    const s=document.createElement('small'); s.textContent = w>=h ? '横' : '縦';
+    b.appendChild(s);
+    b.addEventListener('click', ()=>{ S.ratio=[w,h]; renderChips(); renderSeams(); render(); });
+    box.appendChild(b);
+  });
+}
+$('dirSeg').addEventListener('click', e=>{
+  const b=e.target.closest('button[data-dir]'); if(!b) return;
+  S.dirMode = b.dataset.dir;
+  [].slice.call($('dirSeg').children).forEach(x=>x.setAttribute('aria-pressed', String(x===b)));
+  renderSeams(); render();
+});
+
+/* ---------- 結合部UI ---------- */
+function renderSeams(){
+  const box=$('seams'); box.innerHTML='';
+  syncSeams();
+  const row = dir()==='row';
+  $('seamNote').textContent = S.imgs.length<2
+    ? '画像を2枚以上読み込むと調整できます。'
+    : (row ? '縦の境界線です。傾き 0° で垂直、± で斜めになります。'
+           : '横の境界線です。傾き 0° で水平、± で斜めになります。');
+
+  const mkRange = (label,min,max,step,val,fmt,on)=>{
+    const r=document.createElement('div'); r.className='range';
+    const l=document.createElement('span'); l.className='lbl'; l.textContent=label;
+    const inp=document.createElement('input');
+    inp.type='range'; inp.min=min; inp.max=max; inp.step=step; inp.value=val;
+    inp.setAttribute('aria-label', label);
+    const b=document.createElement('b'); b.textContent=fmt(val);
+    inp.addEventListener('input', ()=>{ b.textContent=fmt(inp.value); on(Number(inp.value)); });
+    r.appendChild(l); r.appendChild(inp); r.appendChild(b);
+    return r;
+  };
+
+  S.seams.forEach((s,i)=>{
+    const wrap=document.createElement('div'); wrap.className='seam';
+    const head=document.createElement('header');
+    const t=document.createElement('b'); t.textContent='結合部 '+(i+1);
+    const kind=document.createElement('span');
+    const kindOf = v => Math.abs(v)<0.5 ? (row?'／垂直':'／水平') : '／斜め';
+    kind.textContent = kindOf(s.tilt);
+    const rst=document.createElement('button'); rst.className='btn'; rst.type='button'; rst.textContent='戻す';
+    rst.addEventListener('click', ()=>{ s.tilt=0; s.pos=(i+1)/S.imgs.length; renderSeams(); render(); });
+    head.appendChild(t); head.appendChild(kind); head.appendChild(rst);
+    wrap.appendChild(head);
+
+    wrap.appendChild(mkRange('位置', 2, 98, .5, (s.pos*100).toFixed(1),
+      v=>Number(v).toFixed(1)+'%', v=>{ s.pos=v/100; render(); }));
+    wrap.appendChild(mkRange('傾き', -60, 60, .5, s.tilt,
+      v=>Number(v).toFixed(1)+'°', v=>{ s.tilt=v; kind.textContent=kindOf(v); render(); }));
+    box.appendChild(wrap);
+  });
+}
+
+/* ---------- 隙間・背景 ---------- */
+$('gap').addEventListener('input', e=>{
+  S.gap = Number(e.target.value);
+  $('gapVal').textContent = S.gap+' px';
+  render();
+});
+$('gapColor').addEventListener('input', e=>{ S.gapColor = e.target.value; render(); });
+$('alpha').addEventListener('change', e=>{ S.alpha = e.target.checked; render(); });
+
+/* ---------- 選択中の画像 ---------- */
+function syncZoom(){
+  const it = S.imgs[S.sel];
+  const v = it ? Math.round(it.zoom*100) : 100;
+  $('zoom').value = v; $('zoomVal').textContent = v+'%';
+  $('zoom').disabled = !it;
+  $('slotNote').textContent = it
+    ? 'キャンバス上をドラッグすると、'+(S.sel+1)+'枚目の位置を調整できます。'
+    : 'キャンバス上をドラッグすると、その画像の位置を調整できます。';
+}
+$('zoom').addEventListener('input', e=>{
+  const it = S.imgs[S.sel]; if(!it) return;
+  it.zoom = Number(e.target.value)/100;
+  $('zoomVal').textContent = e.target.value+'%';
+  render();
+});
+$('fitBtn').addEventListener('click', ()=>{
+  const it = S.imgs[S.sel]; if(!it) return;
+  it.ox=.5; it.oy=.5; render();
+});
+$('resetAllBtn').addEventListener('click', ()=>{
+  S.imgs.forEach(it=>{ it.ox=.5; it.oy=.5; it.zoom=1; });
+  S.seams.forEach(s=>{ s.pos=0; s.tilt=0; });
+  S.gap=0; $('gap').value=0; $('gapVal').textContent='0 px';
+  syncSeams(); renderSeams(); syncZoom(); render();
+});
+
+/* ---------- キャンバス上のドラッグで位置調整 ---------- */
+let drag=null;
+cv.addEventListener('pointerdown', ev=>{
+  if(!S.imgs.length) return;
+  const r = cv.getBoundingClientRect();
+  const px = ev.clientX-r.left, py = ev.clientY-r.top;
+  let idx = lastPolys.findIndex(p=>inPoly(p,px,py));
+  if(idx<0) idx = S.sel;
+  if(idx!==S.sel){ S.sel=idx; renderSlots(); syncZoom(); }
+  const it = S.imgs[idx]; if(!it) return;
+  const bb = clipBox(lastPolys[idx], S.disp.w, S.disp.h);
+  const d = coverRect(it, bb);
+  drag = { it, sx:ev.clientX, sy:ev.clientY, ox:it.ox, oy:it.oy,
+           rx: Math.max(1, d.dw-bb.w), ry: Math.max(1, d.dh-bb.h) };
+  cv.classList.add('busy');
+  cv.setPointerCapture(ev.pointerId);
+  ev.preventDefault();
+  render();
+});
+cv.addEventListener('pointermove', ev=>{
+  if(!drag) return;
+  drag.it.ox = clamp(drag.ox + (ev.clientX-drag.sx)/drag.rx, 0, 1);
+  drag.it.oy = clamp(drag.oy + (ev.clientY-drag.sy)/drag.ry, 0, 1);
+  render();
+});
+function endDrag(ev){
+  if(!drag) return;
+  drag=null; cv.classList.remove('busy');
+  if(ev && cv.hasPointerCapture(ev.pointerId)) cv.releasePointerCapture(ev.pointerId);
+}
+cv.addEventListener('pointerup', endDrag);
+cv.addEventListener('pointercancel', endDrag);
+
+/* ---------- 書き出し ---------- */
+const EXT = {jpeg:'jpg', png:'png', webp:'webp'};
+$('outLong').addEventListener('input', e=>{
+  const v = Number(e.target.value);
+  if(v>=64){ S.outLong = v; render(); }
+});
+$('fmt').addEventListener('click', e=>{
+  const b=e.target.closest('button[data-fmt]'); if(!b) return;
+  S.fmt = b.dataset.fmt;
+  [].slice.call($('fmt').children).forEach(x=>x.setAttribute('aria-pressed', String(x===b)));
+  $('qRow').style.display = (S.fmt==='png') ? 'none' : '';
+  render(); updateName();
+});
+$('quality').addEventListener('input', e=>{
+  S.quality = Number(e.target.value)/100;
+  $('qVal').textContent = e.target.value;
+});
+function baseName(){
+  const it = S.imgs[0]; if(!it) return 'image';
+  const dot = it.name.lastIndexOf('.');
+  return dot>0 ? it.name.slice(0,dot) : (it.name||'image');
+}
+function updateName(){
+  $('outName').textContent = S.imgs.length ? (baseName()+'_concat.'+EXT[S.fmt]) : '—';
+}
+$('saveBtn').addEventListener('click', ()=>{
+  if(!S.imgs.length) return;
+  const o = outSize();
+  const out = document.createElement('canvas');
+  out.width=o.w; out.height=o.h;
+  draw(out.getContext('2d'), o.w, o.h, S.gap, {});
+  out.toBlob(blob=>{
+    if(!blob){ meta.textContent='この形式で書き出せませんでした。別の形式を選んでください。'; return; }
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download = baseName()+'_concat.'+EXT[S.fmt];
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+  }, 'image/'+S.fmt, S.fmt==='png' ? undefined : S.quality);
+});
+
+/* ---------- 起動 ---------- */
+renderChips();
+renderSlots();
+renderSeams();
+syncZoom();
+updateName();
+})();
+</script>
+</body>
+</html>
