@@ -264,6 +264,16 @@ body.dragging .stage::after{
     </section>
 
     <section class="sec">
+      <h2>グレースケール</h2>
+      <div class="range" style="margin-top:0">
+        <span style="color:var(--muted);font-size:12px">度合</span>
+        <input type="range" id="gray" min="0" max="100" step="1" value="0" aria-label="グレースケールの度合">
+        <b id="grayVal">0%</b>
+      </div>
+      <p class="note">プレビューと保存する画像の両方に反映されます。</p>
+    </section>
+
+    <section class="sec">
       <h2>書き出し</h2>
       <div class="seg" id="fmt">
         <button data-fmt="jpeg" aria-pressed="true">jpg</button>
@@ -303,6 +313,7 @@ const S = {
   ratioKey:null,              // 選択中のプリセット識別子
   locked:false,
   fmt:'jpeg', quality:0.92,
+  gray:0,                     // グレースケールの度合（0〜1）
   custom:[]
 };
 
@@ -596,6 +607,26 @@ cropEl.addEventListener('keydown', e=>{
 
 $('lock').addEventListener('change', e=>{ S.locked = e.target.checked; });
 
+/* ---------- グレースケール ---------- */
+// CSS の grayscale() と同じ係数・補間で、プレビューと書き出しの見た目を揃える
+function grayscale(c, w, h, amount){
+  if(!(amount>0)) return;
+  const d = c.getImageData(0,0,w,h), p = d.data;
+  for(let i=0;i<p.length;i+=4){
+    const r=p[i], g=p[i+1], b=p[i+2];
+    const y = 0.2126*r + 0.7152*g + 0.0722*b;
+    p[i]   = r + (y-r)*amount;
+    p[i+1] = g + (y-g)*amount;
+    p[i+2] = b + (y-b)*amount;
+  }
+  c.putImageData(d,0,0);
+}
+$('gray').addEventListener('input', e=>{
+  S.gray = Number(e.target.value)/100;
+  $('grayVal').textContent = e.target.value+'%';
+  photo.style.filter = S.gray ? 'grayscale('+e.target.value+'%)' : '';
+});
+
 /* ---------- 書き出し ---------- */
 const EXT = {jpeg:'jpg', png:'png', webp:'webp'};
 $('fmt').addEventListener('click', e=>{
@@ -622,6 +653,7 @@ $('saveBtn').addEventListener('click', ()=>{
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
   if(S.fmt==='jpeg'){ ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,w,h); }
   ctx.drawImage(S.img, Math.round(c.x), Math.round(c.y), w, h, 0, 0, w, h);
+  grayscale(ctx, w, h, S.gray);
   const type = 'image/'+S.fmt;
   cv.toBlob(blob=>{
     if(!blob){ meta.textContent='この形式で書き出せませんでした。別の形式を選んでください。'; return; }

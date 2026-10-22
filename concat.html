@@ -237,6 +237,16 @@ body.dragging .stage::after{
     </section>
 
     <section class="sec">
+      <h2>グレースケール</h2>
+      <div class="range" style="margin-top:0">
+        <span class="lbl">度合</span>
+        <input type="range" id="gray" min="0" max="100" step="1" value="0" aria-label="グレースケールの度合">
+        <b id="grayVal">0%</b>
+      </div>
+      <p class="note">画像部分に反映されます（隙間と背景の色はそのまま）。</p>
+    </section>
+
+    <section class="sec">
       <h2>選択中の画像</h2>
       <div class="range">
         <span class="lbl">拡大</span>
@@ -297,6 +307,7 @@ const S = {
   dirMode:'auto',          // auto | row | col
   seams:[],                // {pos:0-1, tilt:deg}
   gap:0, gapColor:'#ffffff', alpha:false,
+  gray:0,                  // グレースケールの度合（0〜1）
   outLong:1920,
   fmt:'jpeg', quality:0.92,
   disp:{w:0,h:0,scale:1}
@@ -383,21 +394,47 @@ function trace(c, poly){
   poly.forEach((p,k)=> k ? c.lineTo(p[0],p[1]) : c.moveTo(p[0],p[1]));
   c.closePath();
 }
+// CSS の grayscale() と同じ係数・補間で、RGB を輝度へ寄せる
+function grayscale(c, w, h, amount){
+  if(!(amount>0)) return;
+  const d = c.getImageData(0,0,w,h), p = d.data;
+  for(let i=0;i<p.length;i+=4){
+    const r=p[i], g=p[i+1], b=p[i+2];
+    const y = 0.2126*r + 0.7152*g + 0.0722*b;
+    p[i]   = r + (y-r)*amount;
+    p[i+1] = g + (y-g)*amount;
+    p[i+2] = b + (y-b)*amount;
+  }
+  c.putImageData(d,0,0);
+}
+const layer = document.createElement('canvas');   // グレースケール時に画像だけを描く作業用
+const lctx = layer.getContext('2d', {willReadFrequently:true});
 function draw(c, W, H, gapPx, opts){
   opts = opts || {};
   c.save();
   c.clearRect(0,0,W,H);
   if(!(S.alpha && S.fmt!=='jpeg')){ c.fillStyle = S.gapColor; c.fillRect(0,0,W,H); }
-  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+  // 隙間・背景の色を変えないよう、グレースケール時は画像を別レイヤーに描いてから重ねる
+  let t = c;
+  if(S.gray>0){
+    layer.width = c.canvas.width; layer.height = c.canvas.height;
+    lctx.setTransform(c.getTransform());
+    t = lctx;
+  }
+  t.imageSmoothingEnabled = true; t.imageSmoothingQuality = 'high';
   const polys = regions(W,H,gapPx);
   polys.forEach((poly,i)=>{
     const it = S.imgs[i]; if(!it) return;
-    c.save();
-    trace(c, poly); c.clip();
+    t.save();
+    trace(t, poly); t.clip();
     const d = coverRect(it, clipBox(poly,W,H));
-    c.drawImage(it.img, d.dx, d.dy, d.dw, d.dh);
-    c.restore();
+    t.drawImage(it.img, d.dx, d.dy, d.dw, d.dh);
+    t.restore();
   });
+  if(t!==c){
+    grayscale(lctx, layer.width, layer.height, S.gray);
+    c.save(); c.setTransform(1,0,0,1,0,0); c.drawImage(layer,0,0); c.restore();
+  }
   if(opts.highlight != null && polys[opts.highlight] && polys.length>1){
     c.save();
     trace(c, polys[opts.highlight]);
@@ -608,6 +645,11 @@ $('gap').addEventListener('input', e=>{
 });
 $('gapColor').addEventListener('input', e=>{ S.gapColor = e.target.value; render(); });
 $('alpha').addEventListener('change', e=>{ S.alpha = e.target.checked; render(); });
+$('gray').addEventListener('input', e=>{
+  S.gray = Number(e.target.value)/100;
+  $('grayVal').textContent = e.target.value+'%';
+  render();
+});
 
 /* ---------- 選択中の画像 ---------- */
 function syncZoom(){
@@ -633,6 +675,7 @@ $('resetAllBtn').addEventListener('click', ()=>{
   S.imgs.forEach(it=>{ it.ox=.5; it.oy=.5; it.zoom=1; });
   S.seams.forEach(s=>{ s.pos=0; s.tilt=0; });
   S.gap=0; $('gap').value=0; $('gapVal').textContent='0 px';
+  S.gray=0; $('gray').value=0; $('grayVal').textContent='0%';
   syncSeams(); renderSeams(); syncZoom(); render();
 });
 
