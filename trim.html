@@ -73,7 +73,8 @@ body.dragging .stage::after{
   background:rgba(23,26,33,.72);pointer-events:none;z-index:20;
 }
 .frame{position:relative;overflow:hidden;line-height:0;box-shadow:0 18px 50px rgba(0,0,0,.5)}
-.frame img{display:block;width:100%;height:100%}
+.frame img,.frame canvas.mosaic{display:block;width:100%;height:100%}
+.frame canvas.mosaic{position:absolute;inset:0;image-rendering:pixelated}
 .hidden{display:none !important}
 
 /* ---------- crop box (signature) ---------- */
@@ -213,6 +214,7 @@ body.dragging .stage::after{
     </div>
     <div class="frame hidden" id="frame">
       <img id="photo" alt="読み込んだ画像">
+      <canvas class="mosaic hidden" id="mosaicView"></canvas>
       <div class="crop" id="crop" tabindex="0" role="application" aria-label="トリミング範囲。矢印キーで移動">
         <span class="ants"></span>
         <span class="thirds"></span>
@@ -261,6 +263,16 @@ body.dragging .stage::after{
         <button class="btn" id="maxBtn">最大サイズ</button>
         <button class="btn" id="centerBtn">中央に配置</button>
       </div>
+    </section>
+
+    <section class="sec">
+      <h2>モザイク</h2>
+      <div class="range" style="margin-top:0">
+        <span style="color:var(--muted);font-size:12px">度合</span>
+        <input type="range" id="mosaic" min="0" max="100" step="1" value="0" aria-label="モザイクの度合">
+        <b id="mosaicVal">0%</b>
+      </div>
+      <p class="note">画像全体にかかります。プレビューと保存する画像の両方に反映されます。</p>
     </section>
 
     <section class="sec">
@@ -314,6 +326,7 @@ const S = {
   locked:false,
   fmt:'jpeg', quality:0.92,
   gray:0,                     // グレースケールの度合（0〜1）
+  mosaic:0,                   // モザイクの度合（0〜100）
   custom:[]
 };
 
@@ -415,7 +428,7 @@ function loadFile(file){
     empty.classList.add('hidden'); frame.classList.remove('hidden');
     meta.textContent = file.name + '  ·  ' + S.iw + '×' + S.ih + ' px';
     $('saveBtn').disabled = false;
-    resetCrop(); fit(); paint();
+    resetCrop(); fit(); paint(); renderMosaic();
   };
   img.onerror = () => { meta.textContent = '画像を読み込めませんでした。別のファイルを試してください。'; };
   img.src = url;
@@ -607,6 +620,41 @@ cropEl.addEventListener('keydown', e=>{
 
 $('lock').addEventListener('change', e=>{ S.locked = e.target.checked; });
 
+/* ---------- モザイク ---------- */
+// 度合 100% で長辺が約10ブロックになる。ブロックは元画像の左上基準で揃える
+function mosaicBlock(){
+  if(!S.img || !S.mosaic) return 1;
+  return Math.max(2, Math.round(S.mosaic/100 * Math.max(S.iw,S.ih) / 10));
+}
+function mosaicCanvas(block){
+  const sw = Math.ceil(S.iw/block), sh = Math.ceil(S.ih/block);
+  const small = document.createElement('canvas');
+  small.width = sw; small.height = sh;
+  const sc = small.getContext('2d');
+  sc.imageSmoothingEnabled = true; sc.imageSmoothingQuality = 'high';
+  sc.drawImage(S.img, 0, 0, sw, sh);
+  const out = document.createElement('canvas');
+  out.width = S.iw; out.height = S.ih;
+  const oc = out.getContext('2d');
+  oc.imageSmoothingEnabled = false;
+  oc.drawImage(small, 0, 0, sw, sh, 0, 0, sw*block, sh*block);
+  return out;
+}
+function renderMosaic(){
+  const view = $('mosaicView');
+  const block = mosaicBlock();
+  if(block<=1){ view.classList.add('hidden'); return; }
+  const cv = mosaicCanvas(block);
+  view.width = cv.width; view.height = cv.height;
+  view.getContext('2d').drawImage(cv, 0, 0);
+  view.classList.remove('hidden');
+}
+$('mosaic').addEventListener('input', e=>{
+  S.mosaic = Number(e.target.value);
+  $('mosaicVal').textContent = e.target.value+'%';
+  renderMosaic();
+});
+
 /* ---------- グレースケール ---------- */
 // CSS の grayscale() と同じ係数・補間で、プレビューと書き出しの見た目を揃える
 function grayscale(c, w, h, amount){
@@ -624,7 +672,7 @@ function grayscale(c, w, h, amount){
 $('gray').addEventListener('input', e=>{
   S.gray = Number(e.target.value)/100;
   $('grayVal').textContent = e.target.value+'%';
-  photo.style.filter = S.gray ? 'grayscale('+e.target.value+'%)' : '';
+  frame.style.filter = S.gray ? 'grayscale('+e.target.value+'%)' : '';
 });
 
 /* ---------- 書き出し ---------- */
@@ -652,7 +700,9 @@ $('saveBtn').addEventListener('click', ()=>{
   const ctx = cv.getContext('2d');
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
   if(S.fmt==='jpeg'){ ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,w,h); }
-  ctx.drawImage(S.img, Math.round(c.x), Math.round(c.y), w, h, 0, 0, w, h);
+  const block = mosaicBlock();
+  const src = block>1 ? mosaicCanvas(block) : S.img;
+  ctx.drawImage(src, Math.round(c.x), Math.round(c.y), w, h, 0, 0, w, h);
   grayscale(ctx, w, h, S.gray);
   const type = 'image/'+S.fmt;
   cv.toBlob(blob=>{
